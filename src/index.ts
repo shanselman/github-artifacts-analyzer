@@ -7,6 +7,9 @@ import { ReportGenerator } from './reporter.js';
 import chalk from 'chalk';
 import ora from 'ora';
 
+// Load environment variables from .env file
+dotenv.config();
+
 const program = new Command();
 
 program
