@@ -10,7 +10,12 @@
     "start": "node src/index.js",
     "dev": "node src/index.js",
     "analyze": "node src/index.js analyze",
-    "clean": "rm -rf dist"
+    "cleanup": "node src/index.js analyze --cleanup",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "clean": "rm -rf dist",
+    "example": "./examples.sh",
+    "lint": "echo 'Linting not configured yet'",
+    "version": "node src/index.js --version"
   },
   "keywords": [
     "github",
