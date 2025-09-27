@@ -26,11 +26,13 @@ npm install -g github-artifacts-analyzer
 
 ### Local Development
 ```bash
-git clone <repository>
+git clone https://github.com/shanselman/github-artifacts-analyzer.git
 cd github-artifacts-analyzer
 npm install
 npm run build
 ```
+
+> **📝 TypeScript Project**: Source files are in `src/` (TypeScript), compiled output in `dist/` (JavaScript). Always run `npm run build` after changes.
 
 ## 🔧 Setup
 
@@ -57,11 +59,17 @@ GITHUB_TOKEN=your_token_here
 
 ### Analyze All Repositories
 ```bash
+# Build first (required for TypeScript)
+npm run build
+
 # Basic analysis (includes both public and private repos)
 github-artifacts analyze
 
+# Or use npm scripts (includes build step)
+npm run analyze
+
 # Analyze specific user
-github-artifacts analyze --username shanselman
+npm run analyze -- --username shanselman
 
 # Include expired artifacts
 github-artifacts analyze --include-expired

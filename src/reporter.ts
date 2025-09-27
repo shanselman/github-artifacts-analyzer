@@ -1,7 +1,7 @@
-const Table = require('cli-table3');
-const chalk = require('chalk');
-const fs = require('fs');
-const readline = require('readline');
+import Table from 'cli-table3';
+import chalk from 'chalk';
+import { writeFileSync } from 'fs';
+import * as readline from 'readline';
 
 class ReportGenerator {
   async generateReport(analysis, options) {
@@ -177,7 +177,7 @@ class ReportGenerator {
     const jsonOutput = JSON.stringify(analysis, null, 2);
     
     if (outputFile) {
-      fs.writeFileSync(outputFile, jsonOutput);
+      writeFileSync(outputFile, jsonOutput);
       console.log(chalk.green(`✅ JSON report saved to: ${outputFile}`));
     } else {
       console.log(jsonOutput);
@@ -203,7 +203,7 @@ class ReportGenerator {
     const csvOutput = csvLines.join('\n');
 
     if (outputFile) {
-      fs.writeFileSync(outputFile, csvOutput);
+      writeFileSync(outputFile, csvOutput);
       console.log(chalk.green(`✅ CSV report saved to: ${outputFile}`));
     } else {
       console.log(csvOutput);
@@ -379,7 +379,7 @@ class ReportGenerator {
         console.log(`   ... and ${expiredArtifacts.length - 5} more`);
       }
 
-      const deleteExpired = await this.askQuestion(rl, 
+      const deleteExpired: string = await this.askQuestion(rl, 
         `\n❓ Delete all ${expiredArtifacts.length} expired artifacts? (saves ${this.formatBytes(repo.expiredSizeBytes)}) [y/N]: `
       );
 
@@ -418,7 +418,7 @@ class ReportGenerator {
       }
 
       const totalOldSize = oldActiveArtifacts.reduce((sum, a) => sum + a.sizeInBytes, 0);
-      const deleteOld = await this.askQuestion(rl,
+      const deleteOld: string = await this.askQuestion(rl,
         `\n❓ Delete old active artifacts (>30 days)? (saves ${this.formatBytes(totalOldSize)}) [y/N]: `
       );
 
@@ -450,7 +450,7 @@ class ReportGenerator {
     if (shouldCloseRL) rl.close();
   }
 
-  askQuestion(rl, question) {
+  askQuestion(rl: readline.Interface, question: string): Promise<string> {
     return new Promise(resolve => {
       rl.question(question, answer => {
         resolve(answer.trim());
@@ -459,4 +459,4 @@ class ReportGenerator {
   }
 }
 
-module.exports = { ReportGenerator };
+export { ReportGenerator };

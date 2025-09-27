@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-require('dotenv').config();
-const { Command } = require('commander');
-const { GitHubArtifactsAnalyzer } = require('./analyzer');
-const { ReportGenerator } = require('./reporter');
-const chalk = require('chalk');
-const ora = require('ora');
+import * as dotenv from 'dotenv';
+import { Command } from 'commander';
+import { GitHubArtifactsAnalyzer } from './analyzer.js';
+import { ReportGenerator } from './reporter.js';
+import chalk from 'chalk';
+import ora from 'ora';
 
 const program = new Command();
 
@@ -110,8 +110,8 @@ program
     }
   });
 
-if (require.main === module) {
+if (import.meta.url === `file://${process.argv[1]}`) {
   program.parse();
 }
 
-module.exports = { program };
+export { program };

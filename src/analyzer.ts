@@ -1,7 +1,8 @@
-const { Octokit } = require('@octokit/rest');
-const chalk = require('chalk');
+import { Octokit } from '@octokit/rest';
+import chalk from 'chalk';
 
 class GitHubArtifactsAnalyzer {
+  private octokit: Octokit;
   constructor(token) {
     this.octokit = new Octokit({
       auth: token,
@@ -276,4 +277,4 @@ class GitHubArtifactsAnalyzer {
   }
 }
 
-module.exports = { GitHubArtifactsAnalyzer };
+export { GitHubArtifactsAnalyzer };

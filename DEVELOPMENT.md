@@ -4,15 +4,21 @@
 
 1. Clone the repository
 2. Install dependencies: `npm install`
-3. Create `.env` file with your GitHub token:
+3. **Build TypeScript**: `npm run build`
+4. Create `.env` file with your GitHub token:
    ```
    GITHUB_TOKEN=your_github_personal_access_token_here
    ```
 
+> **TypeScript Project**: Source code is in `src/` (TypeScript), compiled output in `dist/` (JavaScript)
+
 ## Quick Start
 
 ```bash
-# Analyze your repositories
+# Build TypeScript to JavaScript
+npm run build
+
+# Analyze your repositories  
 npm run analyze
 
 # Interactive cleanup mode  
@@ -21,6 +27,9 @@ npm run cleanup
 # Run examples
 npm run example
 
+# Development mode (build + run)
+npm run dev
+
 # Analyze specific user
 npm run analyze -- --username shanselman
 
@@ -28,11 +37,25 @@ npm run analyze -- --username shanselman
 npm start -- --help
 ```
 
+## TypeScript Development
+
+```bash
+# Build TypeScript source files
+npm run build
+
+# Watch mode (rebuild on file changes) 
+npx tsc --watch
+
+# Run directly after building
+npm run dev
+```
+
 ## Important Files
 
 - **`.env`** - Your GitHub token (NEVER commit this!)
-- **`src/`** - Source code (JavaScript)
-- **`dist/`** - Build output (ignored by git)
+- **`src/`** - TypeScript source code  
+- **`dist/`** - Compiled JavaScript output (ignored by git)
+- **`tsconfig.json`** - TypeScript configuration
 - **`node_modules/`** - Dependencies (ignored by git)
 
 ## Git Safety
@@ -50,3 +73,39 @@ The `.gitignore` file protects:
 - Never commit GitHub tokens
 - The tool only reads repositories, it doesn't modify code
 - Cleanup mode only deletes artifacts, never code or repos
+
+## TypeScript Development Workflow
+
+### Making Changes
+1. Edit TypeScript files in `src/`
+2. Run `npm run build` to compile
+3. Test with `npm run start -- --help`
+
+### Development Commands
+```bash
+# One-time build
+npm run build
+
+# Watch mode (rebuild on file changes)
+npx tsc --watch
+
+# Build and run (development mode)
+npm run dev
+
+# Clean build (remove dist first)
+rm -rf dist && npm run build
+```
+
+### Project Structure
+```
+src/           # TypeScript source files (.ts)
+├── analyzer.ts    # Main analysis logic
+├── index.ts       # CLI entry point  
+├── reporter.ts    # Output formatting
+
+dist/          # Compiled JavaScript (.js + .d.ts)
+├── analyzer.js    # Compiled from analyzer.ts
+├── index.js       # Compiled from index.ts
+├── reporter.js    # Compiled from reporter.ts
+└── *.d.ts         # TypeScript type definitions
+```

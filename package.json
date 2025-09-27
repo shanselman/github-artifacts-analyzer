@@ -2,19 +2,21 @@
   "name": "github-artifacts-analyzer",
   "version": "1.0.0",
   "description": "Analyze GitHub repository artifacts and storage usage",
-  "main": "src/index.js",
+  "main": "dist/index.js",
+  "type": "module",
   "bin": {
-    "github-artifacts": "./src/index.js"
+    "github-artifacts": "./dist/index.js"
   },
   "scripts": {
-    "start": "node src/index.js",
-    "dev": "node src/index.js",
-    "analyze": "node src/index.js analyze",
-    "cleanup": "node src/index.js analyze --cleanup",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsc && node dist/index.js",
+    "analyze": "tsc && node dist/index.js analyze",
+    "cleanup": "tsc && node dist/index.js analyze --cleanup",
     "test": "echo \"Error: no test specified\" && exit 1",
     "example": "./examples.sh",
     "lint": "echo 'Linting not configured yet'",
-    "version": "node src/index.js --version"
+    "version": "tsc && node dist/index.js --version"
   },
   "keywords": [
     "github",
@@ -33,5 +35,9 @@
     "commander": "^11.1.0",
     "dotenv": "^17.2.2",
     "ora": "^5.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.17",
+    "typescript": "^5.9.2"
   }
 }
