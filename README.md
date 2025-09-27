@@ -1,5 +1,9 @@
 # GitHub Artifacts Storage Analyzer
 
+[![GitHub](https://img.shields.io/github/license/shanselman/github-artifacts-analyzer)](https://github.com/shanselman/github-artifacts-analyzer/blob/main/LICENSE)
+[![GitHub issues](https://img.shields.io/github/issues/shanselman/github-artifacts-analyzer)](https://github.com/shanselman/github-artifacts-analyzer/issues)
+[![GitHub stars](https://img.shields.io/github/stars/shanselman/github-artifacts-analyzer)](https://github.com/shanselman/github-artifacts-analyzer/stargazers)
+
 A powerful command-line tool to analyze GitHub repository artifacts and identify what's consuming your GitHub Actions storage quota.
 
 ## 🚀 Features
