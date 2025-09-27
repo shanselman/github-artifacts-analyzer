@@ -76,7 +76,12 @@ echo "💡 Tips:"
 echo "- Use --include-expired to see all artifacts (including expired ones)"
 echo "- Use --min-size to filter out small artifacts"
 echo "- Use --format json or csv for programmatic processing"
+echo "- Use --cleanup for interactive artifact deletion"
 echo "- Check analysis.json and analysis.csv files for exported data"
+echo
+echo "🧹 Cleanup Mode Examples:"
+echo "npm run cleanup                    # Interactive cleanup for all repos"
+echo "npm run start -- repo shanselman hanselminutes-core --cleanup"
 echo
 echo "📚 For more information, see README.md or run:"
 echo "npm run start -- --help"
