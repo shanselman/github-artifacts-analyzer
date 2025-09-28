@@ -5,7 +5,14 @@
 1. Clone the repository
 2. Install dependencies: `npm install`
 3. **Build TypeScript**: `npm run build`
-4. Create `.env` file with your GitHub token:
+4. Set up your GitHub token:
+   
+   **Option A: Use GitHub CLI (Recommended)**
+   ```bash
+   export GITHUB_TOKEN=$(gh auth token)
+   ```
+   
+   **Option B: Create `.env` file**
    ```
    GITHUB_TOKEN=your_github_personal_access_token_here
    ```
