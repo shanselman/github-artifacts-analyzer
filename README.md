@@ -46,6 +46,13 @@ npm run build
    - `actions:read` (Read access to actions and workflows)
 
 ### 2. Set Environment Variable (Recommended)
+
+#### Option A: Use GitHub CLI (Easiest)
+```bash
+export GITHUB_TOKEN=$(gh auth token)
+```
+
+#### Option B: Manual Token
 ```bash
 export GITHUB_TOKEN="your_token_here"
 ```
