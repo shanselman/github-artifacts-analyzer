@@ -5,7 +5,7 @@
   "main": "dist/index.js",
   "type": "module",
   "bin": {
-    "github-artifacts": "./dist/index.js"
+    "github-artifacts": "dist/index.js"
   },
   "scripts": {
     "build": "tsc",
@@ -16,7 +16,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "example": "./examples.sh",
     "lint": "echo 'Linting not configured yet'",
-    "version": "tsc && node dist/index.js --version"
+    "version": "tsc && node dist/index.js --version",
+    "prepublishOnly": "npm run build"
   },
   "keywords": [
     "github",
@@ -27,6 +28,14 @@
   ],
   "author": "Scott Hanselman",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shanselman/github-artifacts-analyzer.git"
+  },
+  "homepage": "https://github.com/shanselman/github-artifacts-analyzer#readme",
+  "bugs": {
+    "url": "https://github.com/shanselman/github-artifacts-analyzer/issues"
+  },
   "dependencies": {
     "@octokit/rest": "^20.0.2",
     "bytes": "^3.1.2",

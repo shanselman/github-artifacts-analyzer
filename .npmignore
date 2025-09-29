@@ -1,0 +1,32 @@
+# Source files (only ship compiled JavaScript)
+src/
+tsconfig.json
+
+# Development files
+.env
+.env.*
+examples.sh
+DEVELOPMENT.md
+
+# Node modules and logs
+node_modules/
+npm-debug.log*
+.npm
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Only include what's needed for the package to work:
+# - dist/ (compiled JavaScript)
+# - package.json
+# - README.md  
+# - LICENSE
