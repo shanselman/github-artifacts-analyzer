@@ -44,7 +44,7 @@ npm run build
    3. Select these scopes:
       - `repo` (Full control of private repositories)
       - `read:user` (Read access to user profile data)
-      - `actions:read` (Read access to actions and workflows)
+      -  `workflow` (Read access to workflows)
    4. Notes: Classic tokens are broad — choose a short expiration and store the token securely.
 
 2. Recommended: Fine‑Grained Personal Access Token (FGA)
@@ -54,7 +54,7 @@ npm run build
    4. Under **Repository permissions** set:
       - `Actions` = `Read` (analysis only). If you plan to run `--cleanup` to delete artifacts, set `Actions` = `Read & write` for the repositories you will modify
       - `Contents` = `Read`
-      - `Users` = `Read` (only if the tool queries the authenticated user's profile)
+      - `Profile`=`Read` (account‑level permission — set under Fine‑Grained token **Profile** permissions; only needed if the tool queries the authenticated user's profile)
    5. Set a reasonable expiration and create the token
    6. Save the token securely and export it as an environment variable (PowerShell examples below)
 
