@@ -44,7 +44,7 @@ npm run build
    3. Select these scopes:
       - `repo` (Full control of private repositories)
       - `read:user` (Read access to user profile data)
-      - `workflow` (Read access to workflows)
+      - `actions:read` (Read access to actions and workflows)
    4. Notes: Classic tokens are broad — choose a short expiration and store the token securely.
 
 2. Recommended: Fine‑Grained Personal Access Token (FGA)
