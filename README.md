@@ -44,6 +44,7 @@ npm run build
    - `repo` (Full control of private repositories)
    - `read:user` (Read access to user profile data)
    - `actions:read` (Read access to actions and workflows)
+   - `read:org` (Read organization membership - required for organization analysis)
 
 ### 2. Set Environment Variable (Recommended)
 
@@ -94,6 +95,21 @@ github-artifacts analyze --format csv --output results.csv
 github-artifacts analyze --cleanup
 ```
 
+### Analyze Organization
+```bash
+# Analyze all repositories in an organization
+github-artifacts analyze-org my-company-org
+
+# Show top 20 repositories
+github-artifacts analyze-org my-org --top 20
+
+# Export to JSON
+github-artifacts analyze-org my-org --format json --output org-results.json
+
+# Interactive cleanup mode for organization
+github-artifacts analyze-org my-org --cleanup
+```
+
 ### Analyze Specific Repository
 ```bash
 # Analyze a single repository
@@ -116,6 +132,14 @@ github-artifacts repo shanselman hanselminutes-core --cleanup
 
 #### Analyze Command Options
 - `-u, --username <username>`: GitHub username (defaults to authenticated user)
+- `-f, --format <format>`: Output format (table|json|csv) [default: table]
+- `-o, --output <file>`: Output file path
+- `--include-expired`: Include expired artifacts in analysis [default: false]
+- `--min-size <bytes>`: Minimum artifact size to include in bytes [default: 0]
+- `--top <count>`: Show top N repositories by storage usage [default: 10]
+- `--cleanup`: Interactive cleanup mode - delete artifacts to save space [default: false]
+
+#### Analyze Organization Command Options
 - `-f, --format <format>`: Output format (table|json|csv) [default: table]
 - `-o, --output <file>`: Output file path
 - `--include-expired`: Include expired artifacts in analysis [default: false]
@@ -285,7 +309,8 @@ MIT License - see LICENSE file for details.
 
 **"Access forbidden - check token permissions"**
 - Verify your token has `repo`, `read:user`, and `actions:read` scopes
-- For organization repositories, you might need additional permissions
+- For organization repositories, you also need the `read:org` scope
+- Some organizations require SSO authorization for tokens - you may need to authorize your token
 
 **"No artifacts found"**
 - Repository might not have any GitHub Actions workflows
@@ -301,13 +326,13 @@ MIT License - see LICENSE file for details.
 
 ## 📈 Roadmap
 
+- [x] Organization-wide analysis
 - [ ] Bulk artifact deletion functionality
 - [ ] Integration with GitHub CLI
 - [ ] Webhook support for real-time monitoring
 - [ ] Dashboard web interface
 - [ ] Artifact content analysis
 - [ ] Cost estimation features
-- [ ] Organization-wide analysis
 
 ---
 
