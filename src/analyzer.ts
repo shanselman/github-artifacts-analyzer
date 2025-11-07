@@ -38,7 +38,7 @@ class GitHubArtifactsAnalyzer {
           hasMore = false;
         } else {
           // Filter to only repos owned by the target user (not organizations)
-          const userRepos = repos.filter(repo => 
+          const userRepos = repos.filter(repo =>
             repo.owner.login === username && !repo.fork
           );
 
@@ -102,7 +102,7 @@ class GitHubArtifactsAnalyzer {
           try {
             const analysis = await this.analyzeRepository(repo.owner.login, repo.name, options);
             repositories.push(analysis);
-            
+
             if (analysis.totalArtifacts > 0) {
               console.log(chalk.green(`    ✓ Found ${analysis.totalArtifacts} artifacts (${this.formatBytes(analysis.totalSizeBytes)})`));
             }
@@ -121,6 +121,85 @@ class GitHubArtifactsAnalyzer {
     const summary = this.calculateSummary(repositories);
 
     return {
+      repositories,
+      summary
+    };
+  }
+
+  async analyzeOrganizationRepositories(
+    orgName: string,
+    options = {
+      includeExpired: false,
+      minSize: 0
+    }
+  ) {
+    console.log(chalk.blue(`\n📊 Analyzing organization: ${orgName}\n`));
+
+    const repositories = [];
+    let page = 1;
+    let hasMore = true;
+
+    while (hasMore) {
+      try {
+        // Fetch organization repositories
+        const { data: repos } = await this.octokit.repos.listForOrg({
+          org: orgName,
+          type: 'all', // all, public, private, forks, sources, member
+          per_page: 100,
+          page,
+          sort: 'updated'
+        });
+
+        if (repos.length === 0) {
+          hasMore = false;
+        } else {
+          // Filter out forks (keep only source repos)
+          const filteredRepos = repos.filter(repo => !repo.fork);
+
+          // Process each repository
+          for (const repo of filteredRepos) {
+            console.log(chalk.gray(`  Checking ${repo.full_name}${repo.private ? ' (private)' : ''}...`));
+
+            try {
+              const analysis = await this.analyzeRepository(
+                repo.owner.login,
+                repo.name,
+                {
+                  includeExpired: options.includeExpired ?? false,
+                  minSize: options.minSize ?? 0
+                }
+              );
+              repositories.push(analysis);
+
+              if (analysis.totalArtifacts > 0) {
+                console.log(chalk.green(
+                  `    ✓ Found ${analysis.totalArtifacts} artifacts (${this.formatBytes(analysis.totalSizeBytes)})`
+                ));
+              }
+            } catch (error) {
+              console.log(chalk.yellow(`    ⚠ Skipped (${error?.message || 'Unknown error'})`));
+            }
+
+            // Rate limit protection
+            await this.sleep(100);
+          }
+          page++;
+        }
+      } catch (error) {
+        if (error.status === 404) {
+          throw new Error(`Organization '${orgName}' not found or you don't have access`);
+        } else if (error.status === 403) {
+          throw new Error('Access forbidden - check token has read:org permission');
+        }
+        throw error;
+      }
+    }
+
+    // Calculate summary
+    const summary = this.calculateSummary(repositories);
+
+    return {
+      organizationName: orgName,
       repositories,
       summary
     };
