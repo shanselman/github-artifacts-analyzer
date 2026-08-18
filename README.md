@@ -166,6 +166,16 @@ github-artifacts repo shanselman hanselminutes-core --cleanup
 - **Active Size**: Size of artifacts that haven't expired yet
 - **Expired Size**: Size of artifacts that have expired and can be deleted
 
+### Incomplete Analysis
+
+The analyzer never treats a rate-limited scan as successful. It stops with an error instead of reporting partial totals.
+
+Other repository, workflow, or run failures are tracked explicitly:
+
+- Table output displays a prominent incomplete-analysis warning and skipped counts.
+- JSON output includes `incomplete`, `skippedRepositories`, and `incompleteRepositories`.
+- CSV output includes `Status` and `Error` columns, including rows for skipped repositories.
+
 ### Artifact Details
 - **Name**: Artifact name as specified in the workflow
 - **Size**: Storage space consumed by the artifact
