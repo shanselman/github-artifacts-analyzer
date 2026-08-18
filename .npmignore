@@ -7,6 +7,8 @@ tsconfig.json
 .env.*
 examples.sh
 DEVELOPMENT.md
+tests/
+.github/
 
 # Node modules and logs
 node_modules/

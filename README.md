@@ -38,12 +38,13 @@ npm run build
 
 ### 1. Create a GitHub Personal Access Token
 
-1. Go to [GitHub Settings > Developer settings > Personal access tokens](https://github.com/settings/tokens)
-2. Click "Generate new token (classic)"
-3. Select these scopes:
-   - `repo` (Full control of private repositories)
-   - `read:user` (Read access to user profile data)
-   - `actions:read` (Read access to actions and workflows)
+Use a [fine-grained personal access token](https://github.com/settings/personal-access-tokens/new) when possible:
+
+1. Select the repositories to analyze.
+2. Under **Repository permissions**, set **Actions** to **Read-only**.
+3. If you plan to use `--cleanup`, set **Actions** to **Read and write** instead.
+
+For a [classic personal access token](https://github.com/settings/tokens/new), select the `repo` scope to analyze private repositories. Classic tokens do not have an `actions:read` scope; the `workflow` scope permits updating workflow files and is not required to read artifacts.
 
 ### 2. Set Environment Variable (Recommended)
 
