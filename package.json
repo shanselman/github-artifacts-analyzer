@@ -13,7 +13,7 @@
     "dev": "tsc && node dist/index.js",
     "analyze": "tsc && node dist/index.js analyze",
     "cleanup": "tsc && node dist/index.js analyze --cleanup",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npm run build && node --test tests/cli.test.mjs",
     "example": "./examples.sh",
     "lint": "echo 'Linting not configured yet'",
     "version": "tsc && node dist/index.js --version",

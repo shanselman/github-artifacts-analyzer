@@ -6,6 +6,7 @@ import { GitHubArtifactsAnalyzer } from './analyzer.js';
 import { ReportGenerator } from './reporter.js';
 import chalk from 'chalk';
 import ora from 'ora';
+import { pathToFileURL } from 'url';
 
 // Load environment variables from .env file
 dotenv.config();
@@ -113,7 +114,7 @@ program
     }
   });
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   program.parse();
 }
 

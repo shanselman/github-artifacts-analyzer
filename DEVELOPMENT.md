@@ -42,6 +42,9 @@ npm run analyze -- --username shanselman
 
 # Get help
 npm start -- --help
+
+# Build and run CLI smoke tests
+npm test
 ```
 
 ## TypeScript Development
@@ -86,7 +89,7 @@ The `.gitignore` file protects:
 ### Making Changes
 1. Edit TypeScript files in `src/`
 2. Run `npm run build` to compile
-3. Test with `npm run start -- --help`
+3. Run `npm test`
 
 ### Development Commands
 ```bash
