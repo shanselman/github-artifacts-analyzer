@@ -35,6 +35,12 @@ class ReportGenerator {
   }
 
   generateTableReport(analysis, topCount) {
+    if (analysis.incomplete) {
+      console.log(chalk.bold.red(
+        '\n⚠ Incomplete analysis: some GitHub API requests failed. Totals below are partial.'
+      ));
+    }
+
     // Summary table
     console.log(chalk.bold.blue('\n🚀 GitHub Artifacts Storage Analysis Summary'));
     console.log(chalk.gray('='.repeat(60)));
@@ -46,6 +52,8 @@ class ReportGenerator {
 
     summaryTable.push(
       ['Total Repositories', analysis.summary.totalRepositories.toLocaleString()],
+      ['Repositories Skipped', (analysis.summary.repositoriesSkipped || 0).toLocaleString()],
+      ['Repositories Incomplete', (analysis.summary.repositoriesIncomplete || 0).toLocaleString()],
       ['Repositories with Workflows', analysis.summary.repositoriesWithWorkflows.toLocaleString()],
       ['Repositories with Artifacts', analysis.summary.repositoriesWithArtifacts.toLocaleString()],
       ['Total Artifacts', analysis.summary.totalArtifacts.toLocaleString()],
@@ -108,6 +116,12 @@ class ReportGenerator {
   generateRepositoryTableReport(analysis) {
     console.log(chalk.bold.blue(`\n📊 Repository Analysis: ${analysis.fullName}`));
     console.log(chalk.gray('='.repeat(60)));
+
+    if (analysis.incomplete) {
+      console.log(chalk.bold.red(
+        `⚠ Incomplete analysis: ${analysis.warnings.length} GitHub API request(s) failed.`
+      ));
+    }
 
     if (!analysis.hasWorkflows) {
       console.log(chalk.yellow('No GitHub Actions workflows found in this repository.'));
@@ -185,11 +199,13 @@ class ReportGenerator {
   }
 
   generateCsvReport(analysis, outputFile) {
-    const csvLines = ['Repository,Workflows,Total Artifacts,Total Size (Bytes),Active Artifacts,Active Size (Bytes),Expired Artifacts,Expired Size (Bytes)'];
+    const csvLines = ['Repository,Status,Error,Workflows,Total Artifacts,Total Size (Bytes),Active Artifacts,Active Size (Bytes),Expired Artifacts,Expired Size (Bytes)'];
     
-    for (const repo of analysis.repositories.filter(r => r.totalSizeBytes > 0)) {
+    for (const repo of analysis.repositories) {
       csvLines.push([
-        repo.fullName,
+        this.escapeCsv(repo.fullName),
+        repo.incomplete ? 'incomplete' : 'complete',
+        this.escapeCsv(repo.warnings?.join('; ') || ''),
         repo.workflows.length.toString(),
         repo.totalArtifacts.toString(),
         repo.totalSizeBytes.toString(),
@@ -197,6 +213,15 @@ class ReportGenerator {
         repo.activeSizeBytes.toString(),
         repo.expiredArtifacts.toString(),
         repo.expiredSizeBytes.toString()
+      ].join(','));
+    }
+
+    for (const skipped of analysis.skippedRepositories || []) {
+      csvLines.push([
+        this.escapeCsv(skipped.fullName),
+        'skipped',
+        this.escapeCsv(skipped.reason),
+        '', '', '', '', '', '', ''
       ].join(','));
     }
 
@@ -225,6 +250,11 @@ class ReportGenerator {
     }
 
     console.log(csvLines.join('\n'));
+  }
+
+  escapeCsv(value) {
+    const text = String(value);
+    return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
   }
 
   generateRecommendations(analysis) {

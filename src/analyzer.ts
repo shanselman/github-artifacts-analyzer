@@ -3,11 +3,38 @@ import chalk from 'chalk';
 
 class GitHubArtifactsAnalyzer {
   private octokit: Octokit;
+
   constructor(token) {
     this.octokit = new Octokit({
       auth: token,
       userAgent: 'github-artifacts-analyzer/1.0.0'
     });
+  }
+
+  private isRateLimitError(error) {
+    const headers = error?.response?.headers || {};
+    const message = error?.message || '';
+
+    return error?.code === 'RATE_LIMITED' ||
+      error?.status === 429 ||
+      (error?.status === 403 && (
+        String(headers['x-ratelimit-remaining']) === '0' ||
+        headers['retry-after'] !== undefined ||
+        /rate limit|secondary rate/i.test(message)
+      ));
+  }
+
+  private createRateLimitError(error) {
+    const rateLimitError: any = new Error(
+      'GitHub API rate limit exceeded; analysis stopped to avoid reporting incomplete results'
+    );
+    rateLimitError.code = 'RATE_LIMITED';
+    rateLimitError.cause = error;
+    return rateLimitError;
+  }
+
+  private describeError(error) {
+    return error?.message || 'Unknown error';
   }
 
   async analyzeAllRepositories(username, options = { includeExpired: false, minSize: 0 }) {
@@ -21,6 +48,7 @@ class GitHubArtifactsAnalyzer {
 
     // Get all repositories for the user - both public and private
     const repositories = [];
+    const skippedRepositories = [];
     let page = 1;
     let hasMore = true;
 
@@ -53,7 +81,13 @@ class GitHubArtifactsAnalyzer {
                 console.log(chalk.green(`    ✓ Found ${analysis.totalArtifacts} artifacts (${this.formatBytes(analysis.totalSizeBytes)})`));
               }
             } catch (error) {
-              console.log(chalk.yellow(`    ⚠ Skipped (${error?.message || 'Unknown error'})`));
+              if (this.isRateLimitError(error)) {
+                throw error;
+              }
+
+              const reason = this.describeError(error);
+              skippedRepositories.push({ fullName: repo.full_name, reason });
+              console.log(chalk.yellow(`    ⚠ Skipped (${reason})`));
             }
 
             // Small delay to be respectful to the API
@@ -62,6 +96,10 @@ class GitHubArtifactsAnalyzer {
           page++;
         }
       } catch (error) {
+        if (this.isRateLimitError(error)) {
+          throw this.createRateLimitError(error);
+        }
+
         // Fallback to public repos if authenticated call fails
         if (error.status === 401 || error.status === 403) {
           console.log(chalk.yellow('⚠ Using public repositories only (authentication issue)'));
@@ -72,16 +110,23 @@ class GitHubArtifactsAnalyzer {
     }
 
     // Calculate summary statistics
-    const summary = this.calculateSummary(repositories);
+    const summary = this.calculateSummary(repositories, skippedRepositories);
+    const incompleteRepositories = repositories
+      .filter(repo => repo.incomplete)
+      .map(repo => ({ fullName: repo.fullName, warnings: repo.warnings }));
 
     return {
       repositories,
-      summary
+      summary,
+      incomplete: skippedRepositories.length > 0 || incompleteRepositories.length > 0,
+      skippedRepositories,
+      incompleteRepositories
     };
   }
 
   async analyzePublicRepositories(username, options = { includeExpired: false, minSize: 0 }) {
     const repositories = [];
+    const skippedRepositories = [];
     let page = 1;
     let hasMore = true;
 
@@ -107,7 +152,13 @@ class GitHubArtifactsAnalyzer {
               console.log(chalk.green(`    ✓ Found ${analysis.totalArtifacts} artifacts (${this.formatBytes(analysis.totalSizeBytes)})`));
             }
           } catch (error) {
-            console.log(chalk.yellow(`    ⚠ Skipped (${error?.message || 'Unknown error'})`));
+            if (this.isRateLimitError(error)) {
+              throw this.createRateLimitError(error);
+            }
+
+            const reason = this.describeError(error);
+            skippedRepositories.push({ fullName: repo.full_name, reason });
+            console.log(chalk.yellow(`    ⚠ Skipped (${reason})`));
           }
 
           // Small delay to be respectful to the API
@@ -118,11 +169,17 @@ class GitHubArtifactsAnalyzer {
     }
 
     // Calculate summary statistics
-    const summary = this.calculateSummary(repositories);
+    const summary = this.calculateSummary(repositories, skippedRepositories);
+    const incompleteRepositories = repositories
+      .filter(repo => repo.incomplete)
+      .map(repo => ({ fullName: repo.fullName, warnings: repo.warnings }));
 
     return {
       repositories,
-      summary
+      summary,
+      incomplete: skippedRepositories.length > 0 || incompleteRepositories.length > 0,
+      skippedRepositories,
+      incompleteRepositories
     };
   }
 
@@ -139,7 +196,11 @@ class GitHubArtifactsAnalyzer {
       activeArtifacts: 0,
       expiredArtifacts: 0,
       activeSizeBytes: 0,
-      expiredSizeBytes: 0
+      expiredSizeBytes: 0,
+      incomplete: false,
+      skippedWorkflowRuns: 0,
+      skippedWorkflows: 0,
+      warnings: []
     };
 
     try {
@@ -203,12 +264,28 @@ class GitHubArtifactsAnalyzer {
                 }
               }
             } catch (error) {
-              // Skip individual run if we can't access it
+              if (this.isRateLimitError(error)) {
+                throw this.createRateLimitError(error);
+              }
+
+              analysis.incomplete = true;
+              analysis.skippedWorkflowRuns++;
+              analysis.warnings.push(
+                `Workflow "${workflow.name}" run ${run.id}: ${this.describeError(error)}`
+              );
               continue;
             }
           }
         } catch (error) {
-          // Skip workflow if we can't access it
+          if (this.isRateLimitError(error)) {
+            throw this.createRateLimitError(error);
+          }
+
+          analysis.incomplete = true;
+          analysis.skippedWorkflows++;
+          analysis.warnings.push(
+            `Workflow "${workflow.name}": ${this.describeError(error)}`
+          );
           continue;
         }
       }
@@ -222,7 +299,9 @@ class GitHubArtifactsAnalyzer {
       analysis.expiredSizeBytes = analysis.artifacts.filter(a => a.expired).reduce((sum, a) => sum + a.sizeInBytes, 0);
 
     } catch (error) {
-      if (error?.status === 404) {
+      if (this.isRateLimitError(error)) {
+        throw this.createRateLimitError(error);
+      } else if (error?.status === 404) {
         throw new Error('Repository not found or no access');
       } else if (error?.status === 403) {
         throw new Error('Access forbidden - check token permissions');
@@ -234,9 +313,11 @@ class GitHubArtifactsAnalyzer {
     return analysis;
   }
 
-  calculateSummary(repositories) {
+  calculateSummary(repositories, skippedRepositories = []) {
     return {
       totalRepositories: repositories.length,
+      repositoriesSkipped: skippedRepositories.length,
+      repositoriesIncomplete: repositories.filter(r => r.incomplete).length,
       repositoriesWithWorkflows: repositories.filter(r => r.hasWorkflows).length,
       repositoriesWithArtifacts: repositories.filter(r => r.totalArtifacts > 0).length,
       totalArtifacts: repositories.reduce((sum, r) => sum + r.totalArtifacts, 0),
