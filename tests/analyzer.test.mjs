@@ -120,6 +120,68 @@ test('keeps scanning the rest of an org after one repository fails without retry
   assert.equal(analysis.repositories[0].skippedWorkflowRuns, 1);
 });
 
+test('throttling plugin retries a primary rate limit and tracks the recovered quota', async () => {
+  const analyzer = new GitHubArtifactsAnalyzer('test-token');
+  let callCount = 0;
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async () => {
+    callCount++;
+    if (callCount === 1) {
+      return new Response(JSON.stringify({ message: 'API rate limit exceeded' }), {
+        status: 403,
+        headers: {
+          'content-type': 'application/json',
+          'x-ratelimit-remaining': '0',
+          'x-ratelimit-reset': String(Math.floor(Date.now() / 1000)),
+        },
+      });
+    }
+    return new Response(JSON.stringify({ total_count: 0, workflows: [] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '4999' },
+    });
+  };
+
+  try {
+    const { data } = await analyzer.octokit.actions.listRepoWorkflows({ owner: 'owner', repo: 'repo' });
+    assert.equal(data.total_count, 0);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  assert.equal(callCount, 2);
+  assert.equal(analyzer.remainingRequests, 4999);
+});
+
+test('warns once remaining quota drops to the configured threshold', async () => {
+  const analyzer = new GitHubArtifactsAnalyzer('test-token');
+  const originalFetch = globalThis.fetch;
+
+  globalThis.fetch = async () => new Response(JSON.stringify({ total_count: 0, workflows: [] }), {
+    status: 200,
+    headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '42' },
+  });
+
+  try {
+    await analyzer.octokit.actions.listRepoWorkflows({ owner: 'owner', repo: 'repo' });
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+
+  const logged = [];
+  const originalLog = console.log;
+  console.log = (...args) => logged.push(args.join(' '));
+
+  try {
+    analyzer.warnIfQuotaLow(100);
+  } finally {
+    console.log = originalLog;
+  }
+
+  assert.ok(logged.some(line => line.includes('42')));
+});
+
 test('CSV reports include incomplete and skipped status metadata', () => {
   const directory = mkdtempSync(join(tmpdir(), 'artifact-report-'));
   const outputFile = join(directory, 'report.csv');
