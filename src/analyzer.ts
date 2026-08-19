@@ -1,36 +1,49 @@
-import { Octokit } from '@octokit/rest';
+import { Octokit as OctokitRest } from '@octokit/rest';
+import { throttling } from '@octokit/plugin-throttling';
 import chalk from 'chalk';
 
+const Octokit = OctokitRest.plugin(throttling);
+
 class GitHubArtifactsAnalyzer {
-  private octokit: Octokit;
+  private octokit: InstanceType<typeof Octokit>;
+  private remainingRequests: number | null = null;
 
   constructor(token) {
     this.octokit = new Octokit({
       auth: token,
-      userAgent: 'github-artifacts-analyzer/1.0.0'
+      userAgent: 'github-artifacts-analyzer/1.0.0',
+      throttle: {
+        onRateLimit: (retryAfter, options) => {
+          console.log(chalk.yellow(
+            `\n⏳ Rate limit reached for ${options.method} ${options.url}. Waiting ${retryAfter}s...`
+          ));
+          return true;
+        },
+        onSecondaryRateLimit: (retryAfter, options) => {
+          console.log(chalk.yellow(
+            `\n⏳ Secondary rate limit reached for ${options.method} ${options.url}. Waiting ${retryAfter}s...`
+          ));
+          return true;
+        }
+      }
+    });
+
+    // Track remaining quota from response headers so we can warn the user
+    // proactively, without spending a request on a dedicated rate-limit check.
+    this.octokit.hook.after('request', (response) => {
+      const remaining = response.headers['x-ratelimit-remaining'];
+      if (remaining !== undefined) {
+        this.remainingRequests = Number(remaining);
+      }
     });
   }
 
-  private isRateLimitError(error) {
-    const headers = error?.response?.headers || {};
-    const message = error?.message || '';
-
-    return error?.code === 'RATE_LIMITED' ||
-      error?.status === 429 ||
-      (error?.status === 403 && (
-        String(headers['x-ratelimit-remaining']) === '0' ||
-        headers['retry-after'] !== undefined ||
-        /rate limit|secondary rate/i.test(message)
+  private warnIfQuotaLow(threshold = 100) {
+    if (this.remainingRequests !== null && this.remainingRequests <= threshold) {
+      console.log(chalk.yellow(
+        `  ⚠ Only ${this.remainingRequests} GitHub API requests remaining this hour; expect throttling waits soon.`
       ));
-  }
-
-  private createRateLimitError(error) {
-    const rateLimitError: any = new Error(
-      'GitHub API rate limit exceeded; analysis stopped to avoid reporting incomplete results'
-    );
-    rateLimitError.code = 'RATE_LIMITED';
-    rateLimitError.cause = error;
-    return rateLimitError;
+    }
   }
 
   private describeError(error) {
@@ -72,19 +85,16 @@ class GitHubArtifactsAnalyzer {
 
           // Process repositories in batches to avoid rate limiting
           for (const repo of userRepos) {
+            this.warnIfQuotaLow();
             console.log(chalk.gray(`  Checking ${repo.full_name}${repo.private ? ' (private)' : ''}...`));
             try {
               const analysis = await this.analyzeRepository(repo.owner.login, repo.name, options);
               repositories.push(analysis);
-              
+
               if (analysis.totalArtifacts > 0) {
                 console.log(chalk.green(`    ✓ Found ${analysis.totalArtifacts} artifacts (${this.formatBytes(analysis.totalSizeBytes)})`));
               }
             } catch (error) {
-              if (this.isRateLimitError(error)) {
-                throw error;
-              }
-
               const reason = this.describeError(error);
               skippedRepositories.push({ fullName: repo.full_name, reason });
               console.log(chalk.yellow(`    ⚠ Skipped (${reason})`));
@@ -96,10 +106,6 @@ class GitHubArtifactsAnalyzer {
           page++;
         }
       } catch (error) {
-        if (this.isRateLimitError(error)) {
-          throw this.createRateLimitError(error);
-        }
-
         // Fallback to public repos if authenticated call fails
         if (error.status === 401 || error.status === 403) {
           console.log(chalk.yellow('⚠ Using public repositories only (authentication issue)'));
@@ -143,19 +149,16 @@ class GitHubArtifactsAnalyzer {
       } else {
         // Process repositories in batches to avoid rate limiting
         for (const repo of repos) {
+          this.warnIfQuotaLow();
           console.log(chalk.gray(`  Checking ${repo.full_name}...`));
           try {
             const analysis = await this.analyzeRepository(repo.owner.login, repo.name, options);
             repositories.push(analysis);
-            
+
             if (analysis.totalArtifacts > 0) {
               console.log(chalk.green(`    ✓ Found ${analysis.totalArtifacts} artifacts (${this.formatBytes(analysis.totalSizeBytes)})`));
             }
           } catch (error) {
-            if (this.isRateLimitError(error)) {
-              throw this.createRateLimitError(error);
-            }
-
             const reason = this.describeError(error);
             skippedRepositories.push({ fullName: repo.full_name, reason });
             console.log(chalk.yellow(`    ⚠ Skipped (${reason})`));
@@ -264,10 +267,6 @@ class GitHubArtifactsAnalyzer {
                 }
               }
             } catch (error) {
-              if (this.isRateLimitError(error)) {
-                throw this.createRateLimitError(error);
-              }
-
               analysis.incomplete = true;
               analysis.skippedWorkflowRuns++;
               analysis.warnings.push(
@@ -277,10 +276,6 @@ class GitHubArtifactsAnalyzer {
             }
           }
         } catch (error) {
-          if (this.isRateLimitError(error)) {
-            throw this.createRateLimitError(error);
-          }
-
           analysis.incomplete = true;
           analysis.skippedWorkflows++;
           analysis.warnings.push(
@@ -299,9 +294,7 @@ class GitHubArtifactsAnalyzer {
       analysis.expiredSizeBytes = analysis.artifacts.filter(a => a.expired).reduce((sum, a) => sum + a.sizeInBytes, 0);
 
     } catch (error) {
-      if (this.isRateLimitError(error)) {
-        throw this.createRateLimitError(error);
-      } else if (error?.status === 404) {
+      if (error?.status === 404) {
         throw new Error('Repository not found or no access');
       } else if (error?.status === 403) {
         throw new Error('Access forbidden - check token permissions');
