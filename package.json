@@ -37,6 +37,7 @@
     "url": "https://github.com/shanselman/github-artifacts-analyzer/issues"
   },
   "dependencies": {
+    "@octokit/plugin-throttling": "^8.2.0",
     "@octokit/rest": "^20.0.2",
     "bytes": "^3.1.2",
     "chalk": "^4.1.2",

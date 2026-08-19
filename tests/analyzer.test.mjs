@@ -37,7 +37,10 @@ test('marks a repository incomplete when a workflow query fails', async () => {
   assert.match(analysis.warnings[0], /SSO authorization required/);
 });
 
-test('aborts on rate limits instead of returning partial repository totals', async () => {
+test('tracks an unretried rate-limit error as a normal failure instead of aborting', async () => {
+  // The @octokit/plugin-throttling transport layer retries real rate limits
+  // before they ever reach application code, so anything that still throws
+  // here is a genuine, non-recoverable failure and should just be tracked.
   const analyzer = createAnalyzer({
     actions: {
       listRepoWorkflows: async () => ({ data: workflowFixture() }),
@@ -53,10 +56,11 @@ test('aborts on rate limits instead of returning partial repository totals', asy
     },
   });
 
-  await assert.rejects(
-    () => analyzer.analyzeRepository('owner', 'repo'),
-    error => error.code === 'RATE_LIMITED' && /stopped/.test(error.message)
-  );
+  const analysis = await analyzer.analyzeRepository('owner', 'repo');
+
+  assert.equal(analysis.incomplete, true);
+  assert.equal(analysis.skippedWorkflowRuns, 1);
+  assert.match(analysis.warnings[0], /API rate limit exceeded/);
 });
 
 test('tracks repositories that could not be analyzed', async () => {
@@ -85,11 +89,14 @@ test('tracks repositories that could not be analyzed', async () => {
   ]);
 });
 
-test('aborts an aggregate analysis when a repository hits a rate limit', async () => {
+test('keeps scanning the rest of an org after one repository fails without retry', async () => {
+  let repositoryPage = 0;
   const analyzer = createAnalyzer({
     repos: {
       listForAuthenticatedUser: async () => ({
-        data: [{ full_name: 'owner/repo', owner: { login: 'owner' }, name: 'repo', fork: false, private: true }],
+        data: repositoryPage++ === 0
+          ? [{ full_name: 'owner/repo', owner: { login: 'owner' }, name: 'repo', fork: false, private: true }]
+          : [],
       }),
     },
     actions: {
@@ -106,10 +113,11 @@ test('aborts an aggregate analysis when a repository hits a rate limit', async (
     },
   });
 
-  await assert.rejects(
-    () => analyzer.analyzeAllRepositories('owner'),
-    error => error.code === 'RATE_LIMITED'
-  );
+  const analysis = await analyzer.analyzeAllRepositories('owner');
+
+  assert.equal(analysis.incomplete, true);
+  assert.equal(analysis.summary.repositoriesIncomplete, 1);
+  assert.equal(analysis.repositories[0].skippedWorkflowRuns, 1);
 });
 
 test('CSV reports include incomplete and skipped status metadata', () => {
