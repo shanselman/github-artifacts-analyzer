@@ -37,17 +37,28 @@ test('marks a repository incomplete when a workflow query fails', async () => {
   assert.match(analysis.warnings[0], /SSO authorization required/);
 });
 
-test('tracks an unretried rate-limit error as a normal failure instead of aborting', async () => {
-  // The @octokit/plugin-throttling transport layer retries real rate limits
-  // before they ever reach application code, so anything that still throws
-  // here is a genuine, non-recoverable failure and should just be tracked.
+test('aborts when a rate limit is exhausted mid-repository instead of returning partial totals', async () => {
+  let artifactRequest = 0;
   const analyzer = createAnalyzer({
     actions: {
       listRepoWorkflows: async () => ({ data: workflowFixture() }),
       listWorkflowRuns: async () => ({
-        data: { workflow_runs: [{ id: 20 }] },
+        data: { workflow_runs: [{ id: 20 }, { id: 21 }] },
       }),
       listWorkflowRunArtifacts: async () => {
+        if (artifactRequest++ === 0) {
+          return {
+            data: {
+              artifacts: [{
+                id: 30,
+                name: 'partial-result',
+                size_in_bytes: 1024,
+                expired: false,
+              }],
+            },
+          };
+        }
+
         throw Object.assign(new Error('API rate limit exceeded'), {
           status: 403,
           response: { headers: { 'x-ratelimit-remaining': '0' } },
@@ -56,11 +67,10 @@ test('tracks an unretried rate-limit error as a normal failure instead of aborti
     },
   });
 
-  const analysis = await analyzer.analyzeRepository('owner', 'repo');
-
-  assert.equal(analysis.incomplete, true);
-  assert.equal(analysis.skippedWorkflowRuns, 1);
-  assert.match(analysis.warnings[0], /API rate limit exceeded/);
+  await assert.rejects(
+    () => analyzer.analyzeRepository('owner', 'repo'),
+    error => error.code === 'RATE_LIMITED' && /stopped/.test(error.message)
+  );
 });
 
 test('tracks repositories that could not be analyzed', async () => {
@@ -89,14 +99,11 @@ test('tracks repositories that could not be analyzed', async () => {
   ]);
 });
 
-test('keeps scanning the rest of an org after one repository fails without retry', async () => {
-  let repositoryPage = 0;
+test('aborts an aggregate analysis when a secondary rate limit is exhausted', async () => {
   const analyzer = createAnalyzer({
     repos: {
       listForAuthenticatedUser: async () => ({
-        data: repositoryPage++ === 0
-          ? [{ full_name: 'owner/repo', owner: { login: 'owner' }, name: 'repo', fork: false, private: true }]
-          : [],
+        data: [{ full_name: 'owner/repo', owner: { login: 'owner' }, name: 'repo', fork: false, private: true }],
       }),
     },
     actions: {
@@ -113,11 +120,10 @@ test('keeps scanning the rest of an org after one repository fails without retry
     },
   });
 
-  const analysis = await analyzer.analyzeAllRepositories('owner');
-
-  assert.equal(analysis.incomplete, true);
-  assert.equal(analysis.summary.repositoriesIncomplete, 1);
-  assert.equal(analysis.repositories[0].skippedWorkflowRuns, 1);
+  await assert.rejects(
+    () => analyzer.analyzeAllRepositories('owner'),
+    error => error.code === 'RATE_LIMITED'
+  );
 });
 
 test('throttling plugin retries a primary rate limit and tracks the recovered quota', async () => {
@@ -139,7 +145,12 @@ test('throttling plugin retries a primary rate limit and tracks the recovered qu
     }
     return new Response(JSON.stringify({ total_count: 0, workflows: [] }), {
       status: 200,
-      headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '4999' },
+      headers: {
+        'content-type': 'application/json',
+        'x-ratelimit-limit': '5000',
+        'x-ratelimit-remaining': '4999',
+        'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600),
+      },
     });
   };
 
@@ -152,34 +163,135 @@ test('throttling plugin retries a primary rate limit and tracks the recovered qu
 
   assert.equal(callCount, 2);
   assert.equal(analyzer.remainingRequests, 4999);
+  assert.equal(analyzer.requestLimit, 5000);
 });
 
-test('warns once remaining quota drops to the configured threshold', async () => {
-  const analyzer = new GitHubArtifactsAnalyzer('test-token');
-  const originalFetch = globalThis.fetch;
-
-  globalThis.fetch = async () => new Response(JSON.stringify({ total_count: 0, workflows: [] }), {
-    status: 200,
-    headers: { 'content-type': 'application/json', 'x-ratelimit-remaining': '42' },
+test('derives the proactive threshold from the actual quota', async () => {
+  let probeCount = 0;
+  const analyzer = createAnalyzer({
+    rateLimit: {
+      get: async () => {
+        probeCount++;
+        throw new Error('probe should not run');
+      },
+    },
+    actions: {
+      listRepoWorkflows: async () => ({ data: { total_count: 0, workflows: [] } }),
+    },
   });
+  analyzer.remainingRequests = 50;
+  analyzer.requestLimit = 100;
 
-  try {
-    await analyzer.octokit.actions.listRepoWorkflows({ owner: 'owner', repo: 'repo' });
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
+  const analysis = await analyzer.analyzeRepository('owner', 'repo');
 
-  const logged = [];
+  assert.equal(analysis.incomplete, false);
+  assert.equal(probeCount, 0);
+});
+
+test('waits and rechecks a low quota before continuing mid-repository', async () => {
+  let probeCount = 0;
+  let workflowRequests = 0;
+  const waits = [];
+  const reset = Math.floor(Date.now() / 1000);
+  const analyzer = createAnalyzer({
+    rateLimit: {
+      get: async () => ({
+        data: {
+          resources: {
+            core: probeCount++ === 0
+              ? { limit: 1000, remaining: 100, reset }
+              : { limit: 1000, remaining: 101, reset },
+          },
+        },
+      }),
+    },
+    actions: {
+      listRepoWorkflows: async () => {
+        workflowRequests++;
+        return { data: { total_count: 0, workflows: [] } };
+      },
+    },
+  });
+  analyzer.remainingRequests = 50;
+  analyzer.requestLimit = 1000;
+  analyzer.sleep = async milliseconds => waits.push(milliseconds);
+
+  await analyzer.analyzeRepository('owner', 'repo');
+
+  assert.equal(probeCount, 2);
+  assert.equal(workflowRequests, 1);
+  assert.equal(waits.length, 1);
+  assert.ok(waits[0] > 0 && waits[0] <= 60_000);
+});
+
+test('surfaces rate-limit probe failures instead of disabling protection', async () => {
+  const analyzer = createAnalyzer({
+    rateLimit: {
+      get: async () => {
+        throw new Error('rate-limit endpoint unavailable');
+      },
+    },
+    actions: {
+      listRepoWorkflows: async () => ({ data: { total_count: 0, workflows: [] } }),
+    },
+  });
+  analyzer.remainingRequests = 5;
+  analyzer.requestLimit = 100;
+
+  await assert.rejects(
+    () => analyzer.analyzeRepository('owner', 'repo'),
+    error =>
+      error.code === 'RATE_LIMIT_CHECK_FAILED' &&
+      /rate-limit endpoint unavailable/.test(error.message)
+  );
+});
+
+test('stops instead of waiting beyond the bounded quota window', async () => {
+  let workflowRequests = 0;
+  const analyzer = createAnalyzer({
+    rateLimit: {
+      get: async () => ({
+        data: {
+          resources: {
+            core: {
+              limit: 1000,
+              remaining: 50,
+              reset: Math.floor(Date.now() / 1000) + 120,
+            },
+          },
+        },
+      }),
+    },
+    actions: {
+      listRepoWorkflows: async () => {
+        workflowRequests++;
+        return { data: { total_count: 0, workflows: [] } };
+      },
+    },
+  });
+  analyzer.remainingRequests = 50;
+  analyzer.requestLimit = 1000;
+
+  await assert.rejects(
+    () => analyzer.analyzeRepository('owner', 'repo'),
+    error => error.code === 'RATE_LIMITED'
+  );
+  assert.equal(workflowRequests, 0);
+});
+
+test('bounds primary and secondary rate-limit retries and waits', () => {
+  const analyzer = new GitHubArtifactsAnalyzer('test-token');
+  const options = { method: 'GET', url: '/repos/{owner}/{repo}' };
   const originalLog = console.log;
-  console.log = (...args) => logged.push(args.join(' '));
+  console.log = () => {};
 
   try {
-    analyzer.warnIfQuotaLow(100);
+    assert.equal(analyzer.retryRateLimit('Rate limit', 60, options, 0), true);
+    assert.equal(analyzer.retryRateLimit('Rate limit', 60, options, 1), false);
+    assert.equal(analyzer.retryRateLimit('Secondary rate limit', 61, options, 0), false);
   } finally {
     console.log = originalLog;
   }
-
-  assert.ok(logged.some(line => line.includes('42')));
 });
 
 test('CSV reports include incomplete and skipped status metadata', () => {
