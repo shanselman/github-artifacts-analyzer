@@ -1,14 +1,122 @@
-import { Octokit } from '@octokit/rest';
+import { Octokit as OctokitRest } from '@octokit/rest';
+import { throttling } from '@octokit/plugin-throttling';
 import chalk from 'chalk';
 
+const Octokit = OctokitRest.plugin(throttling);
+const LOW_QUOTA_FRACTION = 0.1;
+const MAX_RATE_LIMIT_RETRIES = 1;
+const MAX_RATE_LIMIT_WAIT_SECONDS = 60;
+const MAX_RATE_LIMIT_RECHECKS = 2;
+
 class GitHubArtifactsAnalyzer {
-  private octokit: Octokit;
+  private octokit: InstanceType<typeof Octokit>;
+  private remainingRequests: number | null = null;
+  private requestLimit: number | null = null;
 
   constructor(token) {
     this.octokit = new Octokit({
       auth: token,
-      userAgent: 'github-artifacts-analyzer/1.0.0'
+      userAgent: 'github-artifacts-analyzer/1.0.0',
+      throttle: {
+        onRateLimit: (retryAfter, options, _octokit, retryCount) =>
+          this.retryRateLimit('Rate limit', retryAfter, options, retryCount),
+        onSecondaryRateLimit: (retryAfter, options, _octokit, retryCount) =>
+          this.retryRateLimit('Secondary rate limit', retryAfter, options, retryCount)
+      }
     });
+
+    this.octokit.hook.after('request', (response) => {
+      this.updateRateLimitState(response.headers);
+    });
+  }
+
+  private retryRateLimit(kind, retryAfter, options, retryCount) {
+    const shouldRetry =
+      retryCount < MAX_RATE_LIMIT_RETRIES &&
+      retryAfter <= MAX_RATE_LIMIT_WAIT_SECONDS;
+    const action = shouldRetry
+      ? `Waiting ${retryAfter}s before the final retry`
+      : 'Retry limit reached; stopping analysis';
+
+    console.log(chalk.yellow(
+      `\n⏳ ${kind} for ${options.method} ${options.url}. ${action}.`
+    ));
+    return shouldRetry;
+  }
+
+  private updateRateLimitState(headers) {
+    const remaining = Number(headers['x-ratelimit-remaining']);
+    const limit = Number(headers['x-ratelimit-limit']);
+
+    if (Number.isFinite(remaining)) {
+      this.remainingRequests = remaining;
+    }
+    if (Number.isFinite(limit) && limit > 0) {
+      this.requestLimit = limit;
+    }
+  }
+
+  private quotaThreshold(limit) {
+    return Math.max(1, Math.ceil(limit * LOW_QUOTA_FRACTION));
+  }
+
+  private async request<T>(operation: () => Promise<T>): Promise<T> {
+    await this.ensureRateLimitAvailability();
+    return operation();
+  }
+
+  private async ensureRateLimitAvailability() {
+    if (
+      this.remainingRequests === null ||
+      this.requestLimit === null ||
+      this.remainingRequests > this.quotaThreshold(this.requestLimit)
+    ) {
+      return;
+    }
+
+    for (let recheck = 0; recheck <= MAX_RATE_LIMIT_RECHECKS; recheck++) {
+      const rate = await this.probeRateLimit();
+      const threshold = this.quotaThreshold(rate.limit);
+
+      if (rate.remaining > threshold) {
+        return;
+      }
+
+      if (recheck === MAX_RATE_LIMIT_RECHECKS) {
+        throw this.createRateLimitError(
+          new Error(`Only ${rate.remaining} of ${rate.limit} requests remain after ${MAX_RATE_LIMIT_RECHECKS} rechecks`)
+        );
+      }
+
+      const retryAfter = Math.max(1, rate.reset - Math.floor(Date.now() / 1000) + 1);
+      if (retryAfter > MAX_RATE_LIMIT_WAIT_SECONDS) {
+        throw this.createRateLimitError(
+          new Error(`Quota reset is ${retryAfter}s away, beyond the ${MAX_RATE_LIMIT_WAIT_SECONDS}s wait limit`)
+        );
+      }
+
+      console.log(chalk.yellow(
+        `  ⏳ Only ${rate.remaining} of ${rate.limit} GitHub API requests remain. Waiting ${retryAfter}s before rechecking...`
+      ));
+      await this.sleep(retryAfter * 1000);
+    }
+  }
+
+  private async probeRateLimit() {
+    try {
+      const { data } = await this.octokit.rateLimit.get();
+      const rate = data.resources.core;
+      this.remainingRequests = rate.remaining;
+      this.requestLimit = rate.limit;
+      return rate;
+    } catch (error) {
+      const probeError: any = new Error(
+        `Unable to verify GitHub API quota: ${this.describeError(error)}`
+      );
+      probeError.code = 'RATE_LIMIT_CHECK_FAILED';
+      probeError.cause = error;
+      throw probeError;
+    }
   }
 
   private isRateLimitError(error) {
@@ -24,13 +132,23 @@ class GitHubArtifactsAnalyzer {
       ));
   }
 
+  private isProtectionError(error) {
+    return error?.code === 'RATE_LIMIT_CHECK_FAILED' || this.isRateLimitError(error);
+  }
+
   private createRateLimitError(error) {
     const rateLimitError: any = new Error(
-      'GitHub API rate limit exceeded; analysis stopped to avoid reporting incomplete results'
+      'GitHub API rate limit protection stopped the analysis to avoid reporting incomplete results'
     );
     rateLimitError.code = 'RATE_LIMITED';
     rateLimitError.cause = error;
     return rateLimitError;
+  }
+
+  private protectionError(error) {
+    return error?.code === 'RATE_LIMITED' || error?.code === 'RATE_LIMIT_CHECK_FAILED'
+      ? error
+      : this.createRateLimitError(error);
   }
 
   private describeError(error) {
@@ -40,7 +158,7 @@ class GitHubArtifactsAnalyzer {
   async analyzeAllRepositories(username, options = { includeExpired: false, minSize: 0 }) {
     // Get authenticated user if no username provided
     if (!username) {
-      const { data: user } = await this.octokit.users.getAuthenticated();
+      const { data: user } = await this.request(() => this.octokit.users.getAuthenticated());
       username = user.login;
     }
 
@@ -55,12 +173,12 @@ class GitHubArtifactsAnalyzer {
     while (hasMore) {
       try {
         // Try authenticated user's repos first (includes private repos)
-        const { data: repos } = await this.octokit.repos.listForAuthenticatedUser({
+        const { data: repos } = await this.request(() => this.octokit.repos.listForAuthenticatedUser({
           visibility: 'all', // Gets both public and private repos
           per_page: 100,
           page,
           sort: 'updated'
-        });
+        }));
 
         if (repos.length === 0) {
           hasMore = false;
@@ -76,13 +194,13 @@ class GitHubArtifactsAnalyzer {
             try {
               const analysis = await this.analyzeRepository(repo.owner.login, repo.name, options);
               repositories.push(analysis);
-              
+
               if (analysis.totalArtifacts > 0) {
                 console.log(chalk.green(`    ✓ Found ${analysis.totalArtifacts} artifacts (${this.formatBytes(analysis.totalSizeBytes)})`));
               }
             } catch (error) {
-              if (this.isRateLimitError(error)) {
-                throw error;
+              if (this.isProtectionError(error)) {
+                throw this.protectionError(error);
               }
 
               const reason = this.describeError(error);
@@ -96,8 +214,8 @@ class GitHubArtifactsAnalyzer {
           page++;
         }
       } catch (error) {
-        if (this.isRateLimitError(error)) {
-          throw this.createRateLimitError(error);
+        if (this.isProtectionError(error)) {
+          throw this.protectionError(error);
         }
 
         // Fallback to public repos if authenticated call fails
@@ -131,12 +249,12 @@ class GitHubArtifactsAnalyzer {
     let hasMore = true;
 
     while (hasMore) {
-      const { data: repos } = await this.octokit.repos.listForUser({
+      const { data: repos } = await this.request(() => this.octokit.repos.listForUser({
         username,
         per_page: 100,
         page,
         type: 'owner' // Only repositories owned by the user, not organizations
-      });
+      }));
 
       if (repos.length === 0) {
         hasMore = false;
@@ -147,13 +265,13 @@ class GitHubArtifactsAnalyzer {
           try {
             const analysis = await this.analyzeRepository(repo.owner.login, repo.name, options);
             repositories.push(analysis);
-            
+
             if (analysis.totalArtifacts > 0) {
               console.log(chalk.green(`    ✓ Found ${analysis.totalArtifacts} artifacts (${this.formatBytes(analysis.totalSizeBytes)})`));
             }
           } catch (error) {
-            if (this.isRateLimitError(error)) {
-              throw this.createRateLimitError(error);
+            if (this.isProtectionError(error)) {
+              throw this.protectionError(error);
             }
 
             const reason = this.describeError(error);
@@ -205,10 +323,10 @@ class GitHubArtifactsAnalyzer {
 
     try {
       // Get workflows for the repository
-      const { data: workflowsData } = await this.octokit.actions.listRepoWorkflows({
+      const { data: workflowsData } = await this.request(() => this.octokit.actions.listRepoWorkflows({
         owner,
         repo
-      });
+      }));
 
       if (workflowsData.total_count === 0) {
         return analysis; // No workflows, no artifacts possible
@@ -226,21 +344,21 @@ class GitHubArtifactsAnalyzer {
       for (const workflow of analysis.workflows) {
         try {
           // Get recent workflow runs
-          const { data: runs } = await this.octokit.actions.listWorkflowRuns({
+          const { data: runs } = await this.request(() => this.octokit.actions.listWorkflowRuns({
             owner,
             repo,
             workflow_id: workflow.id,
             per_page: 100 // Limit to recent runs
-          });
+          }));
 
           for (const run of runs.workflow_runs) {
             try {
               // Get artifacts for this run
-              const { data: artifactsData } = await this.octokit.actions.listWorkflowRunArtifacts({
+              const { data: artifactsData } = await this.request(() => this.octokit.actions.listWorkflowRunArtifacts({
                 owner,
                 repo,
                 run_id: run.id
-              });
+              }));
 
               for (const artifact of artifactsData.artifacts) {
                 if (artifact.size_in_bytes >= options.minSize) {
@@ -264,8 +382,8 @@ class GitHubArtifactsAnalyzer {
                 }
               }
             } catch (error) {
-              if (this.isRateLimitError(error)) {
-                throw this.createRateLimitError(error);
+              if (this.isProtectionError(error)) {
+                throw this.protectionError(error);
               }
 
               analysis.incomplete = true;
@@ -277,8 +395,8 @@ class GitHubArtifactsAnalyzer {
             }
           }
         } catch (error) {
-          if (this.isRateLimitError(error)) {
-            throw this.createRateLimitError(error);
+          if (this.isProtectionError(error)) {
+            throw this.protectionError(error);
           }
 
           analysis.incomplete = true;
@@ -299,8 +417,8 @@ class GitHubArtifactsAnalyzer {
       analysis.expiredSizeBytes = analysis.artifacts.filter(a => a.expired).reduce((sum, a) => sum + a.sizeInBytes, 0);
 
     } catch (error) {
-      if (this.isRateLimitError(error)) {
-        throw this.createRateLimitError(error);
+      if (this.isProtectionError(error)) {
+        throw this.protectionError(error);
       } else if (error?.status === 404) {
         throw new Error('Repository not found or no access');
       } else if (error?.status === 403) {
